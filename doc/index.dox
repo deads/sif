@@ -1,0 +1,1338 @@
+/*!
+
+\author Damian Eads
+
+@mainpage Reference Manual and Format Specification
+\section license License
+\addindex "license information"
+\addindex "copyright information"
+
+Copyright (C) 2004-2006 The Regents of the University of California.
+
+Copyright (C) 2006-2008 Los Alamos National Security, LLC.
+
+This material was produced under U.S. Government contract
+DE-AC52-06NA25396 for Los Alamos National Laboratory (LANL), which is
+operated by Los Alamos National Security, LLC for the U.S.
+Department of Energy. The U.S. Government has rights to use,
+reproduce, and distribute this software.  NEITHER THE
+GOVERNMENT NOR LOS ALAMOS NATIONAL SECURITY, LLC MAKES ANY WARRANTY,
+EXPRESS OR IMPLIED, OR ASSUMES ANY LIABILITY FOR THE USE OF THIS
+SOFTWARE.  If software is modified to produce derivative works, such
+modified software should be clearly marked, so as not to confuse it
+with the version available from LANL.
+
+Additionally, this library is free software; you can redistribute it
+and/or modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either version 2.1
+of the License, or (at your option) any later version. Accordingly, this
+library is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+License for more details.
+
+Los Alamos Computer Code LA-CC-06-105
+
+\section installcompile Installation and Compilation
+
+\addindex "installation"
+\addindex "compilation"
+\addindex "gcc, compiling with"
+\addindex "Cygwin, running on"
+\addindex "Windows XP, running on"
+\addindex "Windows 2000, running on"
+\addindex "platforms, 32-bit support"
+\addindex "platforms, 64-bit support"
+
+The SIF library, <code>sif-io</code>, does not depend on any other libraries except for the C Standard
+Library. The library has been compiled on a few platforms: 32-bit Intel w/ Visual Studio(R)
+on Windows 2000(R), 32-bit Intel w/ Windows XP(R) and 32-bit Intel w/ GNU/Linux with large file
+support (64-bit) turned on. In theory, SIF should compile on platforms that do not
+support 64-bit files but this has not been tested. Cygwin support has not been tested.
+
+\subsection bsifwin Building SIF on Windows
+
+\addindex "Microsoft Visual Studio, compiling with"
+
+Open up the solution file sif.sol and click Build...Compile. This should build
+the sif.dll file, which you may put in a folder that is accessible by your PATH
+variable.
+
+\subsection isifwin Installing SIF on Windows from Binaries
+
+Download one of the binaries from the SIF website,
+<a href="http://public.lanl.gov/eads/sif">http://public.lanl.gov/eads/sif</a>.
+
+\subsection bsiflinux Building SIF on Linux
+
+\addindex "build environment, configuring"
+
+We use the autotools, specifically automake and autoconf. First, your system
+needs to be inspected with autoconf by doing
+\code
+  ./configure
+\endcode
+Configuring without any options installs the library and include files to
+<code>/usr/local</code> by default. To change the prefix, do
+\code
+  ./configure --prefix=/desired/prefix
+\endcode
+
+After configuring your build environment, you are ready to build the library. The
+first command below builds the library while the second command installs it and
+the include files.
+\code
+  make
+  make install
+\endcode
+
+\subsection basiflinux Building against SIF in Linux
+
+\addindex "libsif, linking against"
+\addindex "build prefix"
+\addindex "LD_LIBRARY_PATH"
+\addindex "PATH"
+\addindex "PKG_CONFIG_PATH"
+\addindex "sif-io.h, including"
+\addindex "libraries, linking against"
+
+The compilation of your own code against SIF is not covered in this document since its
+a topic that others have certainly covered better than I could. However, there
+are two helpful points to note: SIF builds a shared library <code>libsif.so</code>, which it
+puts in <code>prefix/lib</code> and it puts a header file <code>sif-io.h</code> in
+<code>prefix/include</code>. You will need to include <code>sif-io.h</code> to have access to SIF
+functions and you will need to link against <code>libsif.so</code>. We provide
+a <code>pkg-config</code> file for your convenience called <code>sif-io.pc</code>,
+which is put in <code>prefix/lib/pkgconfig</code>. If you wish to use it, make sure your
+<code>PKG_CONFIG_PATH</code> includes that directory. Be sure your <code>C_INCLUDE_PATH</code>
+is set to include <code>prefix/include</code> and your <code>LD_LIBRARY_PATH</code> includes
+<code>prefix/lib</code>.
+
+\section intro Introduction
+\addindex "sparse images, definition of"
+The Sparse Image Format (SIF) is a file format for storing raster images
+with sparse pixel data. Images are broken down into a grid of tiles of fixed
+size. A tile is only stored in a file if any two pixels in it are different. This
+is particularly useful for images that are highly homogeneous in color. A
+few applications of SIF include using it to store:
+<ul>
+ <li>\addindex "land-cover classification" land-cover classifications</li>
+ <li>\addindex "training data" training data for pixel classifiers</li>
+ <li>\addindex "sparse overlays" sparse overlay rasters over large images</li>
+</ul>
+The SIF format is not intended for space-efficiently storing multispectral imagery or
+photos.
+
+\subsection terms Basic Terminology
+\addindex "bands, definition of"
+\addindex "pixels, definition of"
+\addindex "slice, definition of"
+\addindex "image, definition of"
+\addindex "data unit, definition of"
+\addindex "data unit size, definition of"
+It is helpful to review some terminology used throughout this document since they
+are essential to understanding the basic operation of the library. Images are
+made up of <b>bands</b> and these bands are made up of <b>pixels</b> or <b>data
+units</b>. For example, an image of 32-bit floats with three bands, the data unit would be
+32-bit float, and the <b>data unit size</b>, 4 bytes. A <b>tile</b>
+is a fixed-size cuboid of an <b>image</b> including all of its bands. A <b>slice</b> is
+a single band of a tile. The next figure illustrates all
+these primitive elements together.
+
+\addindex "abstract image layout, illustration"
+\addindex "image layout, example"
+
+\image html slab.png
+\image latex slab.eps "The abstract layout of a SIF image." width=5in
+
+\addindex "tile header, definition of"
+\addindex "block, unused"
+\addindex "block, used"
+\addindex "block, reclaiming"
+\addindex "unused block, definition of"
+\addindex "used block, definition of"
+
+Every tile has a small <b>tile header</b> describing it: its uniformity and
+its byte offset location on disk (if applicable). A <b>block</b> refers to a unit of
+space on disk for storing a tile. The terms are different to easily differentiate between
+the physical entity of an image (a tile) with the storage space used to store it (block).
+A block need not contain a tile, in which case it is an <b>unused block</b>, and it can be
+reclaimed for later use. The next table shows how all of these image elements (tiles, blocks,
+slices) are related to one another and their relative sizes.
+
+
+ <table align="center">
+  <tr>
+   <td><b>Relevant to</b></td>
+   <td><b>Unit</b></td>
+   <td><b>Size</b></td>
+  </tr>
+  <tr>
+   <td>\addindex "image width" Image</td>
+   <td><code>image_width</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+  <tr>
+   <td>\addindex "image height" Image</td>
+   <td><code>image_height</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+  <tr>
+   <td>\addindex "image bands" Image/Tile/Block</td>
+   <td><code>bands</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+  <tr>
+   <td>\addindex "scan line width" Image</td>
+   <td><code>image_wpixels</code></td>
+   <td><code>ceil(image_width / tile_width) * tile_width</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "scan line height" Image</td>
+   <td><code>image_hpixels</code></td>
+   <td><code>ceil(image_height / tile_height) * tile_height</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "data units, total in image" Image</td>
+   <td><code>image_data_units</code></td>
+   <td><code>image_wpixels * image_hpixels * bands</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "bytes, total in image" Image</td>
+   <td><code>image_bytes</code></td>
+   <td><code>image_data_units * data_unit_size</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "tile width" Tile/Slice/Block</td>
+   <td><code>tile_width</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+  <tr>
+   <td>\addindex "tile height" Tile/Slice/Block</td>
+   <td><code>tile_height</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+  <tr>
+   <td>\addindex "data units, total in tile" Tile</td>
+   <td><code>tile_data_units</code></td>
+   <td><code>tile_width * tile_height * bands</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "bytes, total in tile" Tile</td>
+   <td><code>tile_bytes</code></td>
+   <td><code>tile_pixels * data_unit_size</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "data units, total in block" Block</td>
+   <td><code>block_data_units</code></td>
+   <td><code>block_width * block_height * bands</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "bytes, total in block" Block</td>
+   <td><code>block_bytes</code></td>
+   <td><code>block_pixels * data_unit_size</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "data units, total in slice" Slice</td>
+   <td><code>slice_data_units</code></td>
+   <td><code>tile_width * tile_height * 1</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "bytes, total in slice" Slice</td>
+   <td><code>slice_bytes</code></td>
+   <td><code>slice_data_units * data_unit_size</code></td>
+  </tr>
+  <tr>
+   <td>\addindex "data unit, size of" Data Unit</td>
+   <td><code>data_unit_size</code></td>
+   <td><em>User-defined</em></td>
+  </tr>
+ </table>
+
+\subsection uniform Uniformity and Compression
+
+\addindex "uniformity, definition of"
+
+Compression in the SIF format is quite simple. A slice is <b>uniform</b> if every
+data unit in the slice is the same and the common pixel value for the slice is
+called its <b>uniform pixel value</b>. A tile is uniform if all of its slices are
+uniform. Slices within the same tile need not have the same uniform pixel value.
+
+\addindex "uniformity, illustration"
+\addindex "compression, example"
+
+The next figure shows an example of an image, tile headers for a few tiles, and
+the layout of various elements in the file. The red and white blocks correspond to
+used blocks and unused blocks, respectively. Unused blocks
+are occur when a previously used block is freed up. Let's examine
+five tiles (i, j, k, m, and n), their associated tile headers, and their placement on
+disk.
+<ul>
+ <li><b>tile i</b> is clearly not uniform given the L shaped line in it. Its
+ tile header is consistent with this. On disk, it is stored in the first block in
+ the block region.</li>
+ <li><b>tiles j and k</b> are also not uniform. However, tile j's corresponding
+ block on disk is stored before tile k's block region on disk however in the abstract
+ image, tile j comes after tile i. Thus, there is a lack of contiguity or fragmentation.
+ SIF contains routines for rearranging data blocks so that adjacent tiles in the
+ image are contiguously stored on disk.
+ Defragmentation occurs during a file's close if the \ref sif_header::defragment flag is set in the
+ tile's header. Otherwise, defragmentation only occurs when the \ref sif_defragment function
+ is called.</li>
+ <li><b>tile m</b> is uniform, the uniform pixel values for its bands are 0xFF, 0xCO,
+ and 0x00, and it is not stored in the data block region of the file.</li>
+ <li><b>tile n</b> is also uniform. However, its tile header does not reflect this
+ property, most likely because it was once non-uniform, but it was rewritten, and
+ a uniformity check has yet to be made for it. SIF also provides routines for
+ performing consolidation, checking non-uniform tiles for intrinsic uniformity and
+ freeing up the blocks they use. If the \ref sif_header::consolidate flag is set, consolidation is
+ performed during the file's close.
+</ul>
+
+\addindex "file byte layout, illustration"
+\addindex "image layout, illustration"
+
+\image html disklayout.png
+\image latex disklayout.eps "The physical layout of a SIF image on disk." width=5in
+
+\subsubsection tuniform Types of uniformity
+
+There are three different kinds of uniformity, which are described below.
+
+<ul>
+ <li>\addindex "shallow uniformity" <b>shallow uniformity</b>: a tile has shallow uniformity only when its tile header
+ indicates it is uniform. Tile m exhibits shallow uniformity but tile n does not.</li>
+ <li>\addindex "hidden uniformity" <b>hidden uniformity</b>: a tile has hidden uniformity only when its tile header
+ indicates it is non-uniform but the block corresponding to it on disk is uniform. Tile
+ n exhibits hidden uniformity but tile n does not.</li>
+ <li>\addindex "intrinsic uniformity" <b>intrinsic uniformity</b>: a tile has intrinsic uniformity if it has
+ shallow uniformity or if the data block that corresponds to it is uniform. Both tiles
+ m and n are intrinsically uniform.</li>
+</ul>
+
+\addindex "intrinsic uniformity, checking on write"
+\addindex "uniformity, checking on write"
+\addindex "defragmentation, performing on close"
+\addindex "consolidation, defined"
+\addindex "defragmentation, defined"
+
+Some functions only check for shallow uniformity when performing their
+operations while others consider intrinsic uniformity. The \ref sif_consolidate
+function helps free up data blocks by checking for uniformity of underlying block
+rasters, labeling them as shallow uniform if it finds them to be intrinsically uniform,
+and freeing up the disk blocks used by them. The \ref sif_consolidate function
+also reduces external fragmentation by moving the used blocks to the front of the file
+and the unused blocks to the back. If the \ref sif_header::consolidate flag is set,
+this consolidation process is performed on the file's closing.
+
+\subsubsection overlap Border tiles that overlap the image boundary
+\addindex "border tiles, handling"
+
+Sometimes the tile width does not divide the image width or the tile height
+does not divide the image height. The next Figure illustrates this. The border
+tile overlaps the border of the image. In cases such as these, only tile pixels
+within the image boundary are examined for uniformity. Border tiles cause some
+internal fragmentation but it is often negligible.
+
+\image html bordertile.png
+\image latex bordertile.eps "An image with the border tile overlapping the image border." width=2in
+
+\subsubsection tdchoice Choosing tile dimensions
+\addindex "tile dimensions"
+\addindex "tile width"
+\addindex "tile height"
+
+The choice of tile width and tile height depends on several factors. The
+number of bytes needed to store the tile header relative to the bytes
+needed to store the tile raster. It is also useful to characterize the
+kind of uniformity expected in the image like the largest non-uniform
+region size and the number of these regions.
+
+\subsection metadata Meta-data
+\addindex "meta-data (format spec.)"
+
+The SIF format facilitates the storage of (key, value)-paired meta-data. A (key, value)
+pair is called a meta-data item. A meta-data item is referred to by its <b>key</b>
+and the element data is its <b>value</b>. Keys are case-sensitive.
+
+SIF has two types of meta-data values, strings and binary byte sequences. String
+values must be represented by null-terminated character arrays. Binary byte sequences
+permit the storage of arbitrary data in a SIF file. String values are stored
+as binary byte sequences. If an attempt is made to retrieve a meta-data item as
+a string but the value is not a null-terminated byte sequence, an error is returned.
+
+\subsubsection rmetadata Reserved meta-data
+\addindex "meta-data, reserved"
+\addindex "_sif_proj"
+\addindex "_sif_agree"
+\addindex "projection string"
+\addindex "WKT projection string"
+\addindex "OpenWKT projection string"
+
+Any meta-data key beginning with <code>_sif_</code> is reserved for special
+meta-data, as defined by the SIF file format specification. The following
+reserved meta-data keys are currently in usage:
+<ul>
+ <li><code>_sif_proj</code>
+ <li><code>_sif_agree</code>
+</ul>
+\addindex "meta-data, setting"
+
+The following example sets a meta-data field on the SIF file pointed to by the
+file <code>sif_file</code> pointer,
+\code
+  sif_set_meta_data(file, "model_file", "/afs/clue/gadm/833/hyper.model")
+\endcode
+
+\addindex "meta-data, getting"
+Now, let's retrieves it, and print it
+\code
+  printf("model file: %s\n", sif_get_meta_data(file, "model_file"));
+\endcode
+
+\addindex "meta-data, binary meta-data, handling"
+
+Now let's try to store an array <code>V</code> of 32 doubles using native
+byte order,
+\code
+  sif_set_meta_binary(file, "my_32_doubles", V, sizeof(double) * 32);
+\endcode
+
+Let's now retrieve it and print it out.
+\code
+  double *buf;
+  int nbytes, i;
+  buf = sif_get_meta_data_binary(file, "my_32_doubles", &nbytes);
+  if (nbytes != sizeof(double) * 32) {
+    printf("Something bad happened.\n");
+  }
+  else {
+    for (i = 0; i < 32; i++) {
+      printf("my_double %d: %5.8f\n", i, buf[i]);
+    }
+  }
+\endcode
+
+\subsubsection Caveat
+
+\addindex "meta-data, usage caveat"
+
+Since a copy of all the meta-data in SIF file is always stored in memory, the meta-data feature
+is only intended for light use. In a future version, storage of a large meta-data footprint will
+be viable.
+
+\subsection pdt Pixel Data Types
+
+\addindex "data-types, ignorance in base format"
+\addindex "raster data-types, ignorance in base format"
+
+The SIF file format does not establish a set of data types. The underlying pixel values
+are data-typeless to the SIF I/O library. The library permits the user to store a 
+\ref sif_header::user_data_type field but the field's value does not influence the behavior
+of SIF routines. This scheme of ignoring the underlying data type works if it can be
+guaranteed that two values pixel values p(x1,y1,b1) and p(x2,y2,b2) are the same if and
+only if the underlying byte sequences of these values are the same. Thus, SIF only
+needs to know the size of each underlying byte sequence that represents a single pixel value.
+
+\subsubsection agree Agreement Meta-data String
+
+\addindex "conventions, data type"
+\addindex "data type conventions"
+\addindex "simple data type convention"
+\addindex "simple data type, definition of"
+\addindex "agreement field, meaning"
+\addindex "_sif_agree"
+\addindex "simple convention specifier"
+
+Agreeing to a data type convention provides a guarantee that the data type of pixels
+can easily be determined. We encourage users to set the
+<code>"_sif_agree"</code> meta-data value to a string indicating the data type convention used.
+If <code>"_sif_agree"</code> meta-data string is not set, all bets are off, and no guarantees
+can be made about the data type of the pixels. Alternatively, the \ref sif_get_agreement and
+\ref sif_set_agreement functions can be used to get and set the agreement string.
+
+We define one data type convention, "simple". The type codes for the \ref sif_header::user_data_type
+field are defined below.
+
+\addindex "SIF_SIMPLE_UINT8"
+\addindex "SIF_SIMPLE_UINT16"
+\addindex "SIF_SIMPLE_UINT32"
+\addindex "SIF_SIMPLE_UINT64"
+\addindex "SIF_SIMPLE_INT8"
+\addindex "SIF_SIMPLE_INT16"
+\addindex "SIF_SIMPLE_INT32"
+\addindex "SIF_SIMPLE_INT64"
+\addindex "SIF_SIMPLE_FLOAT32"
+\addindex "SIF_SIMPLE_FLOAT64"
+
+<table align="center">
+ <tr>
+  <td><b>Value of <code>user_data_type</code></b></td>
+  <td><b>Corresponding Data Type</b></td>
+ </tr>
+ <tr>
+  <td>0 or <code>SIF_SIMPLE_UINT8</code></td>
+  <td><code>unsigned char</code> or <code>uint8_t</code> (little-endian)</td>
+ </tr>
+ <tr>
+  <td>1 or <code>SIF_SIMPLE_INT8</code></td>
+  <td><code>char</code> or <code>int8_t</code></td>
+ </tr>
+ <tr>
+  <td>2 or <code>SIF_SIMPLE_UINT16</code></td>
+  <td><code>uint16_t</code></td>
+ </tr>
+ <tr>
+  <td>3 or <code>SIF_SIMPLE_INT16</code></td>
+  <td><code>int16_t</code></td>
+ </tr>
+ <tr>
+  <td>4 or <code>SIF_SIMPLE_UINT32</code></td>
+  <td><code>uint32_t</code></td>
+ </tr>
+ <tr>
+  <td>5 or <code>SIF_SIMPLE_INT32</code></td>
+  <td><code>int32_t</code></td>
+ </tr>
+ <tr>
+  <td>6 or <code>SIF_SIMPLE_UINT64</code></td>
+  <td><code>uint64_t</code></td>
+ </tr>
+ <tr>
+  <td>7 or <code>SIF_SIMPLE_INT64</code></td>
+  <td><code>int64_t</code></td>
+ </tr>
+ <tr>
+  <td>8 or <code>SIF_SIMPLE_FLOAT32</code></td>
+  <td><code>IEEE-754 32-bit float</code></td>
+ </tr>
+ <tr>
+  <td>9 or <code>SIF_SIMPLE_FLOAT64</code></td>
+  <td><code>IEEE-754 64-bit float</code></td>
+ </tr>
+</table>
+
+\addindex "SIF_SIMPLE_LITTLE_ENDIAN"
+\addindex "SIF_SIMPLE_BIG_ENDIAN"
+\addindex "type codes, simple"
+\addindex "type codes, compound"
+\addindex "endianess, image rasters"
+\addindex "little endian, image rasters"
+\addindex "native endian, image rasters"
+\addindex "big endian, image rasters"
+
+For example, suppose we've created a new SIF file with a data_unit_size of
+4. Now let's write some code to indicate the "simple" convention: use unsigned
+32-bit integers as the data type and use big-endian as the byte-order of the
+data units. Then, we'll print out these codes using functions that manipulate
+the compound type code (which we store in the \ref sif_header::user_data_type in
+the file's header) to give the base type code (i.e. the data type irrespective
+of the byte order) and the endian code.
+
+\code
+  int base_code = SIF_SIMPLE_UINT32;
+  int endian_code = SIF_SIMPLE_BIG_ENDIAN;
+  int compound_code = SIF_SIMPLE_TYPE_CODE(base_code, endian_code);
+  sif_set_agreement(file, SIF_AGREEMENT_SIMPLE);
+  sif_set_user_data_type(file, compound_code);
+  printf("Base Data Type: %d\n"
+         "Compound Data Type: %d\n"
+         "Endian: %d\n", SIF_SIMPLE_BASE_TYPE_CODE(compound_code),
+         compound_code, SIF_SIMPLE_ENDIAN(compound_code));
+\endcode
+
+Alternatively, you can use the \ref sif_simple_create function to
+create a file using the "simple" data type convention.
+
+\section layout SIF File Layout
+\addindex "file byte layout"
+\addindex "file format layout"
+\addindex "block region"
+\addindex "meta-data region"
+
+The SIF file begins with a fixed-size header followed by \ref sif_header::n_tiles fixed-sized tile headers,
+followed by a variable number of fixed-sized blocks. Finally, the meta-data is written after all the
+data blocks. The file header and tile headers are put in the beginning of the file since their size
+does not change, although their values may change. This means that the large data blocks need not be
+moved forward in the file. Meta-data is written after the data blocks since the number of meta-data
+items can change; thus, the approach eliminates the need to move up data blocks after inexpensive
+meta-data operations. Unfortunately, there is a danger that after a new data block is allocated, there
+may not be enough space on the partition for the meta-data, and the file's meta-data cannot be safely
+written as read. This kind of data loss is uncommon if efforts are made to ensure adequate disk
+space is available to the scientific programs that use SIF.
+
+ \subsection ovlayout Overall Layout of a SIF File.
+ \addindex "file byte layout, overall (format spec.)"
+
+ The overall layout of a SIF file from the first byte to the last is
+ shown in the following table. The file header remains of constant
+ size and most header fields are immutable. The tile headers are of
+ constant size since the data unit size and number of bands are
+ immutable quantities. The inclusion of routines for changing tile dimensions, image dimensions,
+ endianess, and data types is under currently under
+ consideration. The block region is of variable size and precedes
+ the meta-data region. Consequently, the location of the meta-data
+ region changes as the size of the block region changes. The size of
+ the meta-data region changes as meta-data fields are modified, added,
+ or removed. It was anticipated that meta-data would be modified more
+ infrequently than the data blocks. If the meta-data were to precede
+ the block region, a small increase in the size of the meta-data region
+ would result in the need to move the entire block region, which is
+ costly when the block region is large. This is a casual justification
+ for our choice of storing the meta-data after the block region. Also
+ under consideration is the ability to store the meta-data before the
+ block region, employing preallocation strategies to minimize moves of
+ the block region due to meta-data region resizing.
+
+ <table align="center">
+  <tr>
+   <td>\addindex "header, in overall file layout"<b>File Header</b></td>
+  </tr>
+  <tr>
+   <td>\addindex "tile header, in overall file layout"<b>Tile Header 1</b> (starts at <code>header->header_bytes</code>)</td>
+  </tr>
+  <tr>
+   <td><b>Tile Header 2</b></td>
+  </tr>
+  <tr>
+   <td>...</td>
+  </tr>
+  <tr>
+   <td><b>Tile Header <code>n_tiles</code></b> (starts at <code>file->base_location</code>)</td>
+  </tr>
+  <tr>
+   <td><b>Block 1</b></td>
+  </tr>
+  <tr>
+   <td><b>Block 2</b></td>
+  </tr>
+  <tr>
+   <td>...</td>
+  </tr>
+  <tr>
+   <td>\addindex "block region, in overall file layout"<b>Block <code>n_blocks</code></b></td>
+  </tr>
+  <tr>
+   <td>\addindex "meta-data region, in overall file layout"<b>Meta-data Item 1</b> (starts after the last byte of the last block)</td>
+  </tr>
+  <tr>
+   <td><b>Meta-data Item 2</b></td>
+  </tr>
+  <tr>
+   <td>...</td>
+  </tr>
+  <tr>
+   <td><b>Meta-data Item <code>n_meta_data_items</code></b></td>
+  </tr>
+ </table>
+
+\subsection hlayout File Header Byte Layout
+
+\addindex "header byte layout (format spec.)"
+\addindex "endianess, of non-raster numbers"
+
+The absolute byte offset for each file header field is shown in the
+next table. The second column is the
+name of the field as stored in the \ref sif_header struct stored when a SIF file is opened.
+Integers and doubles are signed and stored in big-endian (or network) byte order. Note that in
+SIF Format Version code 1, doubles were stored little-endian but we realized this was confusing so
+this has been changed to big endian in versions 2 and higher. The <code>header_bytes</code> field
+enables the format to be changed without advancing the version code. Specifically, non-essential
+header fields can be added but they will be ignored by earlier versions of the I/O library.
+
+\addindex "affine georeferencing transform"
+The only fields that can change following the first write of a raster
+to an image are the defragmentation, consolidation, and intrinsic
+write flags as well as the georeferencing transform, and key
+count. If the caller wishes to change the image dimensions, data type,
+or tile dimensions after the first raster write, it must be done
+manually.
+
+ <table align="center">
+  <tr>
+   <td><b>Absolute Offset</b></td>
+   <td><b>Name</b></td>
+   <td><b>Description</b></td>
+   <td><b>Type</b></td>
+  </tr>
+  <tr>
+   <td>0</td>
+   <td>\addindex "header_bytes (format spec.)"<code>header_bytes</code></td>
+   <td>The header size in bytes including the space needed
+       for <code>header_bytes</code>.
+   <td>32-bit int (b.e.)</td>
+  </tr>
+  <tr>
+   <td>\addindex "magic_number (format spec.)"4</td>
+   <td><code>magic_number</code></td>
+   <td>The magic number <code>"!**SIF**"</code>.</td>
+   <td>8 8-bit chars</td>
+  </tr>
+  <tr>
+   <td>\addindex "version (format spec.)" 12</td>
+   <td><code>version</code></td>
+   <td>The version of the SIF file format used for the target file. This field is not
+   the version of the SIF I/O library used to write the file.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "width (format spec.)" 16</td>
+   <td><code>width</code></td>
+   <td>The width of the image in pixels.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "height (format spec.)" 20</td>
+   <td><code>height</code></td>
+   <td>The height of the image in pixels.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "bands (format spec.)" 24</td>
+   <td><code>bands</code></td>
+   <td>The depth of the image in pixels.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "n_keys (format spec.)"28</td>
+   <td><code>n_keys</code></td>
+   <td>The number of meta data fields stored.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "n_tiles (format spec.)" 32</td>
+   <td><code>n_tiles</code></td>
+   <td>The number of tiles stored.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "tile_width (format spec.)" 36</td>
+   <td><code>tile_width</code></td>
+   <td>The width of each tile and slice in pixels.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "tile_height (format spec.)" 40</td>
+   <td><code>tile_height</code></td>
+   <td>The height of each tile and slice in pixels.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "tile_bytes (format spec.)" 44</td>
+   <td><code>tile_bytes</code></td>
+   <td>The number of bytes to store a single tile with all bands.</td>
+   <td>32-bit int</td>
+  </tr>
+ \htmlonly
+ <!--
+ \endhtmlonly
+ </table>
+ \subsection hhlayout Header Byte Layout (continued)
+ <table align="center">
+  <tr>
+   <td><b>Absolute Offset</b></td>
+   <td><b>Name</b></td>
+   <td><b>Description</b></td>
+   <td><b>Type</b></td>
+  </tr>
+ \htmlonly
+ -->
+ \endhtmlonly
+  <tr>
+   <td>\addindex "n_tiles_across (format spec.)" 48</td>
+   <td><code>n_tiles_across</code></td>
+   <td>The number of tiles for a single row of tiles on an image.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "data_unit_size (format spec.)" 52</td>
+   <td><code>data_unit_size</code></td>
+   <td>The size of a single data unit.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "user_data_type (format spec.)" 56</td>
+   <td><code>user_data_type</code></td>
+   <td>A user-defined constant to represent the data type of the pixels,
+       meaningful to the caller.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "defragment (format spec.)" 60</td>
+   <td><code>defragment</code></td>
+   <td>When set, defragments the file during close.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "consolidate (format spec.)" 64</td>
+   <td><code>consolidate</code></td>
+   <td>When set, consolidates the file during close.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "intrinsic_write (format spec.)" 68</td>
+   <td><code>intrinsic_write</code></td>
+   <td>When set, newly dirtied tiles are checked for intrinsic uniformity when written.</td>
+   <td>32-bit int</td>
+  </tr>
+ \htmlonly
+ <!--
+ \endhtmlonly
+ </table>
+ \subsection hhhlayout Header Byte Layout (continued)
+ <table align="center">
+  <tr>
+   <td><b>Absolute Offset</b></td>
+   <td><b>Name</b></td>
+   <td><b>Description</b></td>
+   <td><b>Type</b></td>
+  </tr>
+ \htmlonly
+  -->
+ \endhtmlonly
+  <tr>
+   <td>\addindex "tile_hd_bytes (format spec.)" 72</td>
+   <td><code>tile_hd_bytes</code></td>
+   <td>The number of bytes to store a single tile header
+       on disk.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "n_unif_flags (format spec.)" 76</td>
+   <td><code>n_unif_flags</code></td>
+   <td>The number of bytes to store the uniform flags in the
+       tile header.</td>
+   <td>32-bit int</td>
+  </tr>
+  <tr>
+   <td>\addindex "affine georeferencing transform"\addindex "aff_geo_trans (format spec.)" 80</td>
+   <td><code>aff_geo_trans</code></td>
+   <td>The affine geo-referencing transform.</td>
+   <td>Six 64-bit IEEE-754 doubles (b.e.)</td>
+  </tr>
+ </table>
+
+ \subsection tlayout Tile Header Byte Layout
+
+ \addindex "tile header byte layout (format spec.)"
+
+ The tile headers store information about the uniformity or non-uniformity
+ of the block. If the tile is uniform, the <code>uniform_pixel_value</code> fields have
+ meaning, and the i'th value is the uniform pixel value for the i'th. The
+ <code>block_num</code> field is set to -1 if the tile header corresponds to
+ a non-uniform tile. The first advancing index is the horizontal tile index
+ and the second, the vertical tile index. This corresponds to how tiles are
+ read and written from and to buffers in the image, i.e. the x coordinate of the
+ pixels advances before the y.
+
+ <table align="center">
+  <tr>
+   <td><b>Relative Offset</b> (to the previous unit)</td>
+   <td><b>Name</b></td>
+   <td><b>Description</b></td>
+   <td><b>Type</b></td>
+  </tr>
+  <tr>
+   <td>\addindex "uniform_pixel_value (format spec.)" <code>0</code></td>
+   <td><code>uniform_pixel_value[0]</code></td>
+   <td>The value to fill band 0 if the tile is uniform. Otherwise, the
+       value is meaningless</td>
+   <td><em>User defined</em> (of size <code>data_unit_size</code>)</td>
+  </tr>
+  <tr>
+   <td><code>data_unit_size</code></td>
+   <td><code>uniform_pixel_value[1]</code></td>
+   <td>The value to fill band 1 if the tile is uniform. Otherwise, the
+       value is meaningless</td>
+   <td><em>User defined</em> (of size <code>data_unit_size</code>)</td>
+  </tr>
+  <tr>
+   <td>...</td>
+   <td>...</td>
+   <td>...</td>
+   <td>...</td>
+  </tr>
+  <tr>
+   <td><code>i*data_unit_size</code></td>
+   <td><code>uniform_pixel_value[i]</code></td>
+   <td>The value to fill band i if the tile is uniform. Otherwise, the
+       value is meaningless</td>
+   <td><em>User defined</em> (of size <code>data_unit_size</code>)</td>
+  </tr>
+  <tr>
+   <td>...</td>
+   <td>...</td>
+   <td>...</td>
+   <td>...</td>
+  </tr>
+  <tr>
+   <td><code>(bands - 1) * data_unit_size</code></td>
+   <td><code>uniform_pixel_value[bands - 1]</code></td>
+   <td>The value to fill the last band if the tile is uniform. Otherwise, the
+       value is meaningless</td>
+   <td><em>User defined</em> (of size <code>data_unit_size</code>)</td>
+  </tr>
+  <tr>
+   <td>\addindex "uniform_flags (format spec.)" <code>r=bands * data_unit_size</code></td>
+   <td><code>uniform_flags</code>
+   <td>An array of bits, the i'th bit is TRUE if the i'th slice is uniform.</td>
+   <td><code>h=ceil(bands/8)</code> 8-bit characters</td>
+  </tr>
+  <tr>
+   <td>\addindex "block_num (format spec.)" <code>r+h</code></td>
+   <td><code>block_num</code></td>
+   <td>The block number where this tile is stored if it is non-uniform. This
+       value is -1 if uniform.</td>
+   <td>32-bit int</td>
+  </tr>
+ </table>
+
+ \subsection mlayout Meta-Data Item Byte Layout
+ \addindex "meta-data item layout"
+
+ The meta-data item byte layout is simple. Again, integer length fields are
+ assumed to be big-endian.
+
+ <table align="center">
+  <tr>
+   <td><b>Relative Offset</b> (to the previous unit)</td>
+   <td><b>Name</b></td>
+   <td><b>Description</b></td>
+   <td><b>Type</b></td>
+  </tr>
+  <tr>
+   <td>\addindex "key_length (format spec.)" <code>0</code></td>
+   <td><code>key_length</code></td>
+   <td>The number of bytes to store the key including the null terminator.</td>
+   <td>32-bit int (b.e.)</td>
+  </tr>
+  <tr>
+   <td>\addindex "key (format spec.)" <code>4</code></td>
+   <td><code>key</code></td>
+   <td>The key as a string.</td>
+   <td><code>key_length</code> bytes</td>
+  </tr>
+  <tr>
+   <td>\addindex "value_length (format spec.)" <code>4+key_length</code></td>
+   <td><code>value_length</code></td>
+   <td>The number of bytes to store the value including the null terminator (if the value is non-binary).</td>
+   <td>32-bit int (b.e.)</td>
+  </tr>
+  <tr>
+   <td>\addindex "value (format spec.)" <code>8+key_length</code></td>
+   <td><code>value</code></td>
+   <td>The value as a byte sequence.</td>
+   <td><code>value_length</code> bytes</td>
+  </tr>
+ </table>
+
+ \section versions SIF Library and File Format Versions
+ \addindex "file format versions"
+ \addindex "backwards compatibility"
+ \addindex "writing older format versions"
+ Significant time was invested in designing the SIF file format. Yet, it is inevitable users will
+ ask the author to make changes to it. This is a tricky road for several reasons. Changes that are
+ only useful to a few users pose an issue where the rest of the user base may have compatibility
+ issues when sharing their files since some users will choose to update their library while others
+ will stick with older versions. Changes also add complexity to the unpacking logic in the I/O
+ library, especially since an effort is made to effort ensure backwards compatibility of new
+ versions of the library with older versions of the format. Therefore, my philosophy on changing
+ and developing SIF is one that encourages improvements to the API over changes to the format.
+
+ \addindex "byte order of IEEE doubles, version issues"
+ \addindex "affine georeferencing transform"
+ The first release of the SIF I/O library (0.9) and SIF File Format (code 1)  was internal while
+ the second release (1.0 and code 2) was the first public release. Version 1 assumes integers in
+ the header, tile headers, and meta-data headers are big-endian and doubles are little-endian.
+ Realizing this was confusing, version 2 assumes doubles in the headers (namely \ref sif_header::affine_geo_transform are also big-endian). Files can be written using
+ older versions of the SIF File Format using the \ref sif_use_file_format_version function.
+
+ The following table lists the file versions supported by each version of the SIF I/O library.
+ <table align="center">
+  <tr>
+   <td><b>SIF Software Version</b></td>
+   <td><b>Read</b>
+   <td><b>Write</b>
+  </tr>
+  <tr>
+   <td>0.9</td>
+   <td>1</td>
+   <td>1</td>
+  </tr>
+  <tr>
+   <td>1.0</td>
+   <td>1-2</td>
+   <td>1-2</td>
+  </tr>
+ </table>
+
+\subsection striding Image Pixel and Tile Header Index Computation
+
+\addindex "striding"
+\addindex "coordinate representation"
+\addindex "array representation"
+
+The number of pixels along the <code>x</code>-coordinate axis is given by the image width, and the number of
+pixels y-coordinate axis is given by the image height. Each tile is referenced by a tile coordinate,
+<code>(tx, ty)</code>. <code>tx</code> is the index of the tile with respect to the
+<code>x</code>-coordinate axis and ty is the index of the tile with respect to the y-coordinate axis.
+\addindex "striding, tiles"
+The <code>x</code> index is the fastest advancing index; the <code>y</code> index, the second fastest advancing;
+and the band index, the slowest advancing index. The absolute byte offset <code>q</code> is
+computed from a pixel coordinate (x,y,b) as follows:
+\code
+  q=(b * image_width * image_height) + (image_width * y + x)
+\endcode
+
+\addindex "striding, pixels"
+The absolute tile index <code>r</code> is similarly computed,
+\code
+  r=(n_tiles_across*ty)+tx
+\endcode
+
+\section errcheck Error Checking and Reporting
+
+\addindex "error checking"
+\addindex "error descriptions"
+\addindex "platform-specific error codes"
+
+The SIF library performs extensive error checking for I/O errors, memory allocation errors, and
+errors in the parameters passed to SIF functions. The \ref sif_file::error code is set to 0
+or \ref SIF_ERROR_NONE during normal operation. No \ref sif-io.h function resets this flag so
+the caller must do so if the error is deemed as non-fatal and the caller wishes to perform
+further operations on the file. Most SIF functions return immediately the first time an error
+is encountered. Memory allocated during an operation resulting in an error is deallocated
+prior to returning. The value returned by non-void functions during an error depends on the expected
+range of values for that function. If a pointer is usually returned, 0 is returned; if a positive number is
+usually returned, a non-positive is returned; or if a non-positive is usually returned, a number
+greater than zero is returned. For ease of coding, callers should test the \ref sif_file::error
+flag rather than checking the return value because of the lack of consistency of return values
+when returning due to an error. The \ref sif_get_error_description function returns a string
+description of an error code, which callers may conveniently use when reporting errors.
+
+\section posscheck Testing for a valid SIF file
+
+\addindex "file validity, verifying"
+
+The \ref sif_is_possibly_sif_file function checks whether a file could possibly be a SIF
+file. The present version only checks whether the magic number is valid. Future versions of
+the library will ensure:
+<ul>
+  <li>given the header, there are enough tile headers;</li>
+  <li>there are blocks stored in the file corresponding to the offsets specified in tile headers with non-negative block indices; and</li>
+  <li>the meta-data is properly stored.
+
+\section ssci Simple Convention Interface
+
+\addindex "simple convention"
+
+Bundled with the SIF library are functions for manipulating SIF files conforming to the
+"simple" data type convention. These functions begin with <code>sif_simple_</code>.
+
+\subsection ssci_create Creating SIF Simple Files
+
+\addindex "file creation (simple)"
+
+The \ref sif_simple_create and \ref sif_simple_create_defaults functions are both used
+to create a SIF file conforming to the "simple" data type convention. The latter function
+sets defaults related to consolidation, uniformity checking, defragmentation, and tile
+size. Native byte order is used to store the image rasters; however all header fields,
+tile header fields, and meta-data length fields are all stored in big-endian byte order,
+regardless of the endian of the image rasters. The \ref sif_simple_set_endian function must be
+called after creating the file and prior to performing any image I/O if the file's image endian
+is changed. Undefined behavior occurs when the endian field is changed after performing image I/O.
+
+\subsection ssci_io Image I/O
+\addindex "image I/O (simple)"
+
+When data blocks are written to or read from a file, the blocks are converted to the
+appropriate byte order prior to writing to the file or after reading from it. <code>sif_simple_</code>
+functions may not be used unless the file is opened with the \ref sif_simple_create,
+\ref sif_simple_create_defaults, or \ref sif_simple_open function.
+
+\subsection ssci_rio Rectangular Region I/O
+\addindex "region I/O (simple)"
+
+The \ref sif_simple_set_raster and \ref sif_simple_get_raster functions are used to
+write and read a rectangular region, respectively. Only one band can be read or written
+at a time. The offsets and dimensions of the region are in pixel units, not tile units. The
+\ref sif_simple_is_shallow_uniform checks whether the tiles comprising a rectangular region
+are stored as shallow uniform.
+
+\subsection ssci_rq Tile Block I/O
+\addindex "tile block I/O (simple)"
+
+The \ref sif_simple_get_tile_slice and \ref sif_simple_set_tile_slice functions read
+and write a slice. The \ref sif_simple_fill_tile_slice function fills a slice with
+a constant value. The \ref sif_is_slice_shallow_uniform function checks whether a slice
+is stored as shallow uniform in the file. 
+
+\subsection ssci_scc Checking for Conformity
+\addindex "convention conformity, verifying (simple)"
+
+The conformity of a file to the "simple" data type convention can be
+verified with the \ref sif_is_simple or \ref
+sif_is_simple_by_name functions. The first function assumes the
+file as already been opened with \ref sif_open while the second
+accepts a filename.
+
+\section memnotes Notes on Memory Preallocation
+
+\addindex "memory preallocation"
+
+SIF allocates enough memory to hold two image blocks in memory for each open SIF file. When
+the \ref sif_simple_open (for update), \ref sif_simple_create, or
+\ref sif_simple_create_defaults functions are used to open or create a SIF file conforming
+to the "simple" data type convention, a buffer is also allocated for converting the byte order
+of image rasters. The buffer is initially the size of a block. When a call is made to
+\ref sif_simple_set_raster with a raster larger than the size of the buffer, the buffer
+is enlarged appropriately. Note that this buffer is not needed if the file is opened for
+read-only access, since the byte order conversion is performed on the caller's buffer.
+All of a file's memory buffers are deallocated during close.
+
+\section cliutils Command Line Utilities
+
+\addindex command line utilities
+\addindex sif-util
+
+We provide the <code>sif-util</code> command for you to use to
+create, inspect and manipulate SIF files at a UNIX or DOS shell. The
+first argument is the name of the file to manipulate;
+the second argument, the name of the operation to perform; and the
+remaining arguments, the parameters of the operation. Following this,
+additional operations may be specified, and they are delimited with
+the 'and' keyword.
+\code
+  sif-util filename operation operation-args [and operation operation-args]
+\endcode
+
+\subsection cliargs sif-util Supported Operations
+We now describe each of the operations supported by
+<code>sif-util</code>. Arguments are mandatory unless enclosed with
+square brackets; multiple arguments in square brackets indicate that
+all of the arguments enclosed must be specified together if any of them
+are specified. The <code>keyword=</code> is for explanation purposes so
+do not specify <code>keyword=</code> when invoking the <code>sif-util</code>
+command. Indicated in parenthesis is whether the file must be writable to
+perform the operation. If a create operation is specified, the
+file will be created, <b>and all data will be erased if the file already
+exists!</b> If a <code>create</code> operation is specified, the file is
+created before performing all other operations and all other file creation
+operations are ignored. Otherwise, operations are performed in the order
+specified in the command.
+
+<ul>
+  <li>\addindex "consolidate (sif-util)" <code><b>consolidate</b> on/off/now</code> <em>(writable)</em>:
+  when set to <code>on</code>, a file opened for update is
+  consolidated whenever it is closed. When set to <code>now</code> the
+  <code>consolidate</code> flag in the file's header is unchanged and
+  consolidation is performed immediately on the file.</li>
+
+  <li>\addindex "create (sif-util)" <code><b>create</b> width height bands sdt [consolidate=on/off]
+  [defragment=on/off] [tw=int] [th=int] [intrinsic=on/off] [endian=native]</code> <em>(writable)</em>:
+  creates an image file conforming to the "simple" data type
+  convention. The dimensions of the image are <code>width</code> by
+  <code>height</code> with <code>band</code> bands. The simple data type
+  code for the image is defined with <code>sdt</code>, which must be
+  between 0 and 9 or a string type identifier (uint8, uint16, uint32,
+  uint64, int8, int16, int32, int64, float, double). When the defragment flag
+  (default=<code>on</code>) is set, the file is scheduled for defragmentation
+  whenever it is closed. When the consolidate flag
+  (default=<code>on</code>) is set, the file is scheduled for
+  consolidation whenever it is closed. The <code>tw</code>
+  (default=64) and
+  <code>th</code> (default=64) parameters are the width and height of the tiles in
+  the image. When the <code>intrinsic</code> write flag
+  (default=<code>on</code>) is set, whenever a raster is written to a
+  file, it is checked for intrinsic uniformity. Native byte order
+  is used for storing the image raster unless the <code>endian</code>
+  is set to <code>big</code> or <code>little</code>.</li>
+
+  <li>\addindex "defragment (sif-util)" <code><b>defragment</b> on/off/now</code> <em>(writable)</em>:
+  when set to <code>on</code>, a file opened for update is
+  defragmented whenever it is  closed. When set to <code>now</code> the
+  <code>defragment</code> flag in the file's header is unchanged and
+  defragmentation is performed immediately on the file.</li>
+
+  <li>\addindex "get-md (sif-util)" <code><b>get-md</b> key</code>: returns the meta-data
+  field referred to by <code>key</code>. If the meta-data is binary,
+  each non-printable character is printed with <code>\\xYY</code> where
+  <code>YY</code> is the character's hexadecimal code. New lines
+  are printed with <code>\\n</code>.</li>
+
+  <li>\addindex "has-key (sif-util)" <code><b>has-key</b> key</code>: prints "yes" if a meta-data field
+  with key <code>key</code> is stored in the file, and "no" otherwise.
+
+  <li>\addindex "header (sif-util)" <code><b>header</b></code>: prints out the file's header in a
+  human-readable format.</li>
+
+  <li>\addindex "intrinsic (sif-util)" <code><b>intrinsic</b> on/off</code> <em>(writable)</em>:
+  when set, whenever a raster is written to the file, it is checked
+  for intrinsic uniformity.</li>
+
+  <li>\addindex "is-sif (sif-util)" <code><b>is-sif</b></code>: writes "yes" if the file is a SIF
+  file, and no, otherwise.
+
+  <li>\addindex "is-simple (sif-util)" <code><b>is-simple</b></code>: writes "yes" if the file is a SIF
+  file and conforms to the "simple" data type convention, and no,
+  otherwise.
+
+  <li>\addindex "list-keys (sif-util)" <code><b>list-keys</b></code>: lists the meta-data keys
+  in the file. Each key is printed on a separate line.</li>
+
+  <li>\addindex "list-md (sif-util)" <code><b>list-md</b></code>: lists the meta-data in
+  the file. Each <code>key=value</code> pair is printed on a separate
+  line. Each non-printable character is printed with <code>\\xYY</code> where
+  <code>YY</code> is the character's hexadecimal code. New lines are
+  printed with <code>\\n</code>.</li>
+
+  <li>\addindex "region-to-ppm (sif-util)" <code><b>region-to-pnm</b> [x y w h] [band=int/all]</code>: prints
+  the file's raster in PNM format. This output can be redirected to a
+  PNM file and then converted to another image format using your favorite
+  image converter. When
+  <code>x</code>, <code>y</code>, <code>w</code>, and <code>h</code>
+  are set, the region is read starting at <code>(x,y)</code> with width
+  <code>w</code> and height <code>h</code>. When the <code>band</code>
+  parameter (default=all) is set to a non-negative integer value, a specific band
+  is written. By the default, the entire image is printed.</li>
+
+  <li>\addindex "remove-md (sif-util)" <code><b>remove-md</b> key</code> <em>(writable)</em>: removes the meta-data field referred to by <code>key</code>.</li>
+
+  <li>\addindex "set-affine (sif-util)" <code><b>set-affine</b> v1 v2 v3 v4 v5 v6</code> <em>(writable)</em>: sets the affine georeferencing transform</code>; v1 through v6 must be doubles.</li>
+
+  <li>\addindex "set-md (sif-util)" <code><b>set-md</b> key value</code> <em>(writable)</em>: sets the meta-data
+  field referred to by <code>key</code> with the string value
+  <code>value</code>. If the meta-data is binary, each non-printable
+  character must be written with <code>\\xYY</code> where <code>YY</code>
+  is the character's hexadecimal code. New lines must be written with
+  <code>\\n</code>.</li>
+
+  <li>\addindex "set-proj (sif-util)" <code><b>set-proj</b> value</code> <em>(writable)</em>: sets the projection using the string <code>value</code>, which must be in OpenWKT format.</li>
+
+  <li>\addindex "set-ud (sif-util)" <code><b>set-ud</b> dtype</code> <em>(writable)</em>: sets the user-defined data type integer type code to <code>dtype</code>. Warning: improper use of this command may render your file unreadable. If the file is known to conform to the simple data type convention, use <code>set-ud</code> instead.</li>
+
+  <li>\addindex "set-sud (sif-util)" <code><b>set-sud</b> dtype
+  </code> <em>(writable)</em>: sets the data type for the simple data
+  type file where <code>dtype</code> is one of the string type
+  identifiers "uint8", "int8", "uint16", "int16", "uint32", "int32",
+  "uint64", "int64", "float32", "float" (assumed to be 32-bit IEEE 764
+  float), "float64", or "double" (assumed to be 64-bit IEEE 764
+  float). Warning: improper use of this command may render your file
+  unreadable.</li>
+
+  <li>\addindex "statistics (sif-util)" <code><b>statistics</b>:</code> prints some file statistics, including
+  the number of tiles that are either shallow uniform, hidden
+  uniform, and intrinsically non-uniform. The number of blocks in the
+  block region as well as the number of unused blocks is also
+  printed. These statistics may be useful to decide whether to
+  defragment or consolidate a file. Also printed is the percentage of
+  space saved by the compression and the space that could be saved
+  if consolidation was performed.</li>
+
+  <li>\addindex "tile-to-pnm (sif-util)" <code><b>tile-to-pnm</b> tx ty [band=int/all]</code>: prints out
+  the tile in the file with tile coordinates <code>tx</code> and
+  <code>ty</code> in PNM format. This output can be redirected to a
+  PNM file and then converted to another image format using your favorite
+  image converter. When the <code>band</code> parameter (default=all)
+  is set to a non-negative integer value, a specific band
+  is written.</li>
+</ul>
+
+\subsubsection noteonpnm A Note on PNM Output
+
+\addindex "PNM output (sif-util)"
+\addindex "PGM output (sif-util)"
+\addindex "PPM output (sif-util)"
+\addindex "PAM output (sif-util)"
+\addindex "exporting, other formats"
+
+When the PNM output operations <code>region-to-pnm</code> and
+<code>tile-to-pnm</code> are used, the pixel values are assumed
+to be of unsigned type. If the number of bands to write is 3, the
+PPM subformat is used with each of the three bands representing a
+separate color (band[0]=R, band[1]=G, band[2]=B). When writing
+a single band, the PGM format is used. If the image contains any
+other number of bands, the PAM format is used. The data unit
+size must not exceed 2 bytes, i.e. only uint8 and uint16 are
+supported. It is assumed the image raster is
+stored in native byte order if the file does not conform to
+the "simple" data type convention. The image raster is translated
+into proper ASCII decimal form (PPM or PGM format) or big-endian
+byte order (PAM format) prior to being outputted. 
+
+\section faq Frequently Asked Questions (FAQ)
+
+The following is a list of frequently asked questions from some
+of our internal users.  This manual probably does not cover all points
+so users are encouraged to send their questions to the package
+maintainer.
+
+<ol>
+ <li><b>Why another image file format?</b> Good question. We could not
+ find an image file format that provided the exact functionality provided
+ by SIF.</li>
+
+ <li><b>How big can a SIF image be?</b>
+ SIF is built with 64-bit file support enabled. In theory, the
+ size of SIF files is limited by that which is supported by the
+ host Operating System.
+
+ <li><b>When should I set the endian of a file?</b>
+ Before writing or filling any tiles in the image.</li>
+
+ <li><b>What are the default pixel values of an image when it
+ is created?</b>
+ In short, zero. All tiles are uniform when the file is created.
+ A byte sequence of zeros is used as the uniform pixel value for every slice of
+ every tile. Thus, the endian can be changed after a file is created and before
+ it is written without effect.</li>
+
+ <li><b>Can the tile dimensions of a SIF file be changed after creation?</b>
+ No. However, this can manually be done by creating a new SIF file with the desired
+ new parameters, reading the tiles from the source file and writing them to the new file.
+ </li>
+
+ <li><b>Can the image dimensions of a SIF file be changed after creation?</b>
+ Nope.
+ </li>
+
+ <li><b>Does SIF compile on Power PC architectures?</b>
+ I don't know but I'd like to not only know if it works, I'd appreciate help getting it
+ to work if it doesn't.
+ </li>
+
+ <li><b>Does SIF compile on Darwin?</b>
+ I don't know.
+ </li>
+
+ <li><b>Does a program using SIF library headers and linking against the SIF shared library
+ need any special flags, such as those needed to compile with large file support?</b>
+ Nope.
+ </li>
+
+ <li><b>Does SIF compile with the Solaris compiler?</b> I don't know.</b>
+</ol>
+
+\section consider Features Under Consideration
+
+<ol>
+ <li>A function for copying a SIF file to a new SIF file with different parameters (e.g. tile
+     size, simple data type, or endian.)</li>
+ <li>A function for resizing the image stored in a SIF file.</li>
+ <li>Better file conformity checking is needed in \ref sif_is_possibly_sif_file.</li>
+ <li>Being able to change the endian of the pixel values in the rasters in a file
+     might be helpful for users who exchange files between systems with different byte orders,
+     and would eliminate the extra computation.</li>
+ <li>When a large number of SIF files are open for update, the block buffers can take
+     an extraordinary amount of memory. Shared block buffers within each
+     thread might help reduce the memory footprint.</li>
+ <li>The developer should have the ability to call a function to reduce memory
+     footprint after large writes have been performed.</li>
+ <li>Compress non-uniform tiles with a lossless compression algorithm. Bin blocks by
+     their compressed size rounded to the nearest power of two. Have a separate
+     block region for each block bin size.</li>
+ <li>A GIMP plug-in would be very useful for users to manipulate SIF files. I would
+     appreciate if someone wrote and maintained this plug-in.</li>
+</ol>
+
+*/

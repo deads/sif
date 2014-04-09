@@ -1,0 +1,26 @@
+all: doc/index.dox sif-io.h doc/doxygen.sty doc/header.tex Doxyfile.web Doxyfile.latex latex/refman.tex html/index.html
+	cp doc/doxygen.sty latex
+	cd latex && make pdf && cd ..
+
+latex/refman.tex: Doxyfile.latex doc/doxygen.sty doc/header.tex doc/index.dox sif-io.h
+	doxygen Doxyfile.latex
+
+html/index.html: Doxyfile.web doc/index.dox sif-io.h
+	doxygen Doxyfile.web
+
+Doxyfile.web: Doxyfile.in
+	cat Doxyfile.in \
+            | sed 's/@GENERATE_LATEX@/NO/g' \
+            | sed 's/@GENERATE_HTML@/YES/g' \
+            | sed 's/@BRIEF_MEMBER_DESC@/YES/g' \
+            | sed 's/@REPEAT_BRIEF@/YES/g' > Doxyfile.web
+
+Doxyfile.latex:	Doxyfile.in
+	cat Doxyfile.in \
+            | sed 's/@GENERATE_LATEX@/YES/g' \
+            | sed 's/@GENERATE_HTML@/NO/g' \
+            | sed 's/@BRIEF_MEMBER_DESC@/NO/g' \
+            | sed 's/@REPEAT_BRIEF@/YES/g' > Doxyfile.latex
+
+clean:
+	rm -rf html/ latex/
