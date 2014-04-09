@@ -5,6 +5,7 @@
                       Damian Eads <eads@lanl.gov>
 
 1. Introduction
+---------------
 
 The Sparse Image Format (SIF) is a file format for storing sparse raster 
 images. It works by breaking an image down into tiles. Space is saved 
@@ -16,6 +17,7 @@ A C library is provided to manipulate files in SIF format. Detailed
 documentation is provided for each function in sif-io.c.
 
 2. Building the SIF C library
+-----------------------------
 
 You will need gcc version 3.2.3 and gmake, and your kernel must support 
 64-bit files. Type in the following at the bash prompt to build:
@@ -24,11 +26,12 @@ You will need gcc version 3.2.3 and gmake, and your kernel must support
 
 This will create a library file called sif-io.so.
 
-4. SIF Functions
+3. SIF Functions
+----------------
 
-  Detailed documentation is given for each function in the library. This 
-  brief tutorial demonstrates the basics of how the SIF I/O library is
-  used.
+Detailed documentation is given for each function in the library. This 
+brief tutorial demonstrates the basics of how the SIF I/O library is
+used.
  
   1. The header sif-io.h must be included.
 
@@ -80,7 +83,8 @@ This will create a library file called sif-io.so.
   Note that the second argument is a boolean flag. Pass true to open 
   the file for reading only, and false otherwise.
 
-5. License
+4. License
+----------
 
  Copyright (C) 2004-2006 The Regents of the University of California.
  Copyright (C) 2007 Los Alamos National Security, LLC.
